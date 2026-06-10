@@ -13,20 +13,22 @@ const PILL_TYPES = {
     index: 100,
     label: 'Morning Peak',
     defaultParams: { size: 'Normal' },
+    // Adds a morning hump on hours 7-10 that always increases consumption
     transform(curve, params) {
       const mult = { Small: 0.7, Normal: 1.0, Large: 1.4 }[params.size]
-      const peakHours = [7, 8, 9, 10]
-      return curve.map((v, i) => peakHours.includes(i) ? +(v * mult).toFixed(4) : v)
+      const adds = { 7: 2.5, 8: 3.5, 9: 2.0, 10: 0.8 }
+      return curve.map((v, i) => adds[i] !== undefined ? +(v + adds[i] * mult).toFixed(4) : v)
     },
   },
   'evening-peak': {
     index: 101,
     label: 'Evening Peak',
     defaultParams: { size: 'Normal' },
+    // Adds an evening hump on hours 16-19 that always increases consumption
     transform(curve, params) {
       const mult = { Small: 0.7, Normal: 1.0, Large: 1.4 }[params.size]
-      const peakHours = [16, 17, 18, 19]
-      return curve.map((v, i) => peakHours.includes(i) ? +(v * mult).toFixed(4) : v)
+      const adds = { 16: 1.5, 17: 3.5, 18: 3.0, 19: 1.8 }
+      return curve.map((v, i) => adds[i] !== undefined ? +(v + adds[i] * mult).toFixed(4) : v)
     },
   },
 }
@@ -165,9 +167,7 @@ export default function App() {
   ])
 
   // --- Average state ---
-  const [targetDaily, setTargetDaily] = useState(
-    () => (flat24.reduce((a, b) => a + b, 0)) * 1.329 // ~31.9, matches original default
-  )
+  const [targetDaily, setTargetDaily] = useState(31.9)
   const [inputStr, setInputStr] = useState('31.9')
   const [period, setPeriod] = useState('daily')
 
