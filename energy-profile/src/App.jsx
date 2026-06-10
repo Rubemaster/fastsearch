@@ -1,22 +1,58 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip } from 'chart.js'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from 'chart.js'
 import { Bar } from 'react-chartjs-2'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip)
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip)
 
 const labels = Array.from({ length: 24 }, (_, i) => `${i}:00`)
+const flat24 = Array(24).fill(1)
 
-const wdBase = [0.4,0.4,0.4,0.4,0.5,1.2,2.8,3.2,1.4,0.8,0.6,0.5,0.5,0.5,0.6,1.0,2.2,3.8,3.4,2.8,1.6,0.8,0.5,0.4]
-const weBase = [0.4,0.4,0.4,0.4,0.4,0.5,0.8,1.4,2.6,3.0,2.4,2.0,1.8,1.6,1.6,2.0,2.8,3.8,4.2,3.4,2.6,1.8,1.0,0.6]
+// --- Pill type registry ---
+const PILL_TYPES = {
+  'morning-peak': {
+    index: 100,
+    label: 'Morning Peak',
+    defaultParams: { size: 'Normal' },
+    transform(curve, params) {
+      const mult = { Small: 0.7, Normal: 1.0, Large: 1.4 }[params.size]
+      const peakHours = [7, 8, 9, 10]
+      return curve.map((v, i) => peakHours.includes(i) ? +(v * mult).toFixed(4) : v)
+    },
+  },
+  'evening-peak': {
+    index: 101,
+    label: 'Evening Peak',
+    defaultParams: { size: 'Normal' },
+    transform(curve, params) {
+      const mult = { Small: 0.7, Normal: 1.0, Large: 1.4 }[params.size]
+      const peakHours = [16, 17, 18, 19]
+      return curve.map((v, i) => peakHours.includes(i) ? +(v * mult).toFixed(4) : v)
+    },
+  },
+}
 
-const wdSum = wdBase.reduce((a, b) => a + b, 0)
-const weSum = weBase.reduce((a, b) => a + b, 0)
-const baseDaily = (wdSum * 5 + weSum * 2) / 7
+// --- Average normalizer (always last, index 1,000,000) ---
+function normalizeToDaily(curve, targetDaily) {
+  const sum = curve.reduce((a, b) => a + b, 0)
+  if (sum === 0) return curve
+  const factor = targetDaily / sum
+  return curve.map(v => +(v * factor).toFixed(2))
+}
+
+// --- Pipeline: apply all pills in index order, then normalize ---
+function buildCurve(activePills, targetDaily) {
+  let curve = [...flat24]
+  const sorted = [...activePills].sort(
+    (a, b) => (PILL_TYPES[a.type]?.index ?? 0) - (PILL_TYPES[b.type]?.index ?? 0)
+  )
+  for (const pill of sorted) {
+    const def = PILL_TYPES[pill.type]
+    if (def) curve = def.transform(curve, pill.params)
+  }
+  return normalizeToDaily(curve, targetDaily)
+}
 
 const periodMult = { daily: 1, weekly: 7, monthly: 30, annual: 365 }
-const periodLabel = { daily: 'day', weekly: 'week', monthly: 'month', annual: 'year' }
-
-function scale(arr, f) { return arr.map(v => +(v * f).toFixed(2)) }
 
 const chartOpts = {
   responsive: true,
@@ -49,8 +85,6 @@ function Pill({ onClick, onRemove, hideDot, style, children, ...rest }) {
       {!hideDot && (
         <span
           onClick={e => { e.stopPropagation(); onRemove?.() }}
-          onMouseEnter={() => setHover(true)}
-          onMouseLeave={() => setHover(false)}
           style={{
             display: 'inline-block', width: 10, height: 10,
             borderRadius: '50%', flexShrink: 0, marginRight: 4,
@@ -61,6 +95,52 @@ function Pill({ onClick, onRemove, hideDot, style, children, ...rest }) {
       )}
       {children}
     </div>
+  )
+}
+
+function PeakPill({ pill, onRemove, onParamChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const def = PILL_TYPES[pill.type]
+
+  useEffect(() => {
+    if (!open) return
+    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <Pill onRemove={() => onRemove(pill.id)}>
+      <div ref={ref} style={{ position: 'relative', display: 'inline-flex', gap: 3 }}>
+        <span onClick={() => setOpen(!open)} style={{ cursor: 'pointer', fontWeight: 700 }}>
+          {pill.params.size} <span style={{ fontSize: 9, color: '#888' }}>▾</span>
+        </span>
+        <span>{def.label.toLowerCase()}</span>
+        {open && (
+          <div style={{
+            position: 'absolute', top: '100%', left: 0, zIndex: 10,
+            background: '#fff', border: '1px solid #e5e5e5', borderRadius: 4,
+            boxShadow: '0 2px 10px rgba(0,0,0,0.07)', padding: '2px 0',
+            minWidth: 60, marginTop: 3
+          }}>
+            {['Small','Normal','Large'].map(s => (
+              <div key={s}
+                onClick={() => { onParamChange(pill.id, 'size', s); setOpen(false) }}
+                style={{
+                  padding: '4px 10px', cursor: 'pointer', fontSize: 12,
+                  background: s === pill.params.size ? '#f5f5f5' : 'transparent', color: '#444',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f0f0f0'}
+                onMouseLeave={e => e.currentTarget.style.background = s === pill.params.size ? '#f5f5f5' : 'transparent'}
+              >
+                {s}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Pill>
   )
 }
 
@@ -78,38 +158,86 @@ function mkData(data, color) {
 }
 
 export default function App() {
-  const [daily, setDaily] = useState(baseDaily)
-  const [inputStr, setInputStr] = useState(baseDaily.toFixed(1))
+  // --- Pills state ---
+  const [pills, setPills] = useState([
+    { id: 'morning', type: 'morning-peak', params: { size: 'Normal' } },
+    { id: 'afternoon', type: 'evening-peak', params: { size: 'Normal' } },
+  ])
+
+  // --- Average state ---
+  const [targetDaily, setTargetDaily] = useState(
+    () => (flat24.reduce((a, b) => a + b, 0)) * 1.329 // ~31.9, matches original default
+  )
+  const [inputStr, setInputStr] = useState('31.9')
   const [period, setPeriod] = useState('daily')
+
   const wdRef = useRef(null)
   const weRef = useRef(null)
   const [periodOpen, setPeriodOpen] = useState(false)
   const periodRef = useRef(null)
-  const [extraProfiles, setExtraProfiles] = useState([])
   const [addOpen, setAddOpen] = useState(false)
   const addRef = useRef(null)
-  const [morningSize, setMorningSize] = useState('Normal')
-  const [afternoonSize, setAfternoonSize] = useState('Normal')
-  const [morningOpen, setMorningOpen] = useState(false)
-  const [afternoonOpen, setAfternoonOpen] = useState(false)
-  const morningRef = useRef(null)
-  const afternoonRef = useRef(null)
-  const [peakPills, setPeakPills] = useState(['morning', 'afternoon'])
 
-  const addProfile = useCallback(() => {
-    setExtraProfiles(prev => [...prev, {
-      id: Date.now(),
-      label: `Profile ${prev.length + 1}`,
-      color: `hsl(${(prev.length * 60 + 200) % 360}, 60%, 55%)`
+  // --- Derive curve data ---
+  const wdCurve = useMemo(() => buildCurve(pills, targetDaily), [pills, targetDaily])
+  const weCurve = useMemo(() => buildCurve(pills, targetDaily), [pills, targetDaily])
+
+  const wdPeak = Math.max(...wdCurve)
+  const wePeak = Math.max(...weCurve)
+  const wdTotal = wdCurve.reduce((a, b) => a + b, 0)
+  const weTotal = weCurve.reduce((a, b) => a + b, 0)
+
+  // --- Input controllers ---
+  const handleInput = useCallback(e => {
+    setInputStr(e.target.value)
+    const v = parseFloat(e.target.value)
+    if (!isNaN(v) && v > 0) {
+      setTargetDaily(v / periodMult[period])
+    }
+  }, [period])
+
+  const handlePeriodChange = useCallback(e => {
+    const next = e.target.value
+    setPeriod(next)
+    setInputStr((targetDaily * periodMult[next]).toFixed(1))
+  }, [targetDaily])
+
+  // --- Pill controls ---
+  const activeTypes = pills.map(p => p.type)
+
+  const addPill = useCallback(type => {
+    const def = PILL_TYPES[type]
+    if (!def || activeTypes.includes(type)) return
+    setPills(prev => [...prev, {
+      id: type,
+      type,
+      params: { ...def.defaultParams },
     }])
+  }, [activeTypes])
+
+  const removePill = useCallback(id => {
+    setPills(prev => prev.filter(p => p.id !== id))
   }, [])
 
+  const setPillParam = useCallback((id, key, value) => {
+    setPills(prev => prev.map(p =>
+      p.id === id ? { ...p, params: { ...p.params, [key]: value } } : p
+    ))
+  }, [])
+
+  // --- Sorted pills for rendering ---
+  const sortedPills = useMemo(
+    () => [...pills].sort(
+      (a, b) => (PILL_TYPES[a.type]?.index ?? 0) - (PILL_TYPES[b.type]?.index ?? 0)
+    ),
+    [pills]
+  )
+
+  // --- Dropdown close handlers ---
   useEffect(() => {
     if (!periodOpen) return
     const handler = e => {
-      if (periodRef.current && !periodRef.current.contains(e.target)) {
-        setPeriodOpen(false)
-      }
+      if (periodRef.current && !periodRef.current.contains(e.target)) setPeriodOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -118,67 +246,11 @@ export default function App() {
   useEffect(() => {
     if (!addOpen) return
     const handler = e => {
-      if (addRef.current && !addRef.current.contains(e.target)) {
-        setAddOpen(false)
-      }
+      if (addRef.current && !addRef.current.contains(e.target)) setAddOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [addOpen])
-
-  useEffect(() => {
-    if (!morningOpen) return
-    const handler = e => { if (morningRef.current && !morningRef.current.contains(e.target)) setMorningOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [morningOpen])
-
-  useEffect(() => {
-    if (!afternoonOpen) return
-    const handler = e => { if (afternoonRef.current && !afternoonRef.current.contains(e.target)) setAfternoonOpen(false) }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [afternoonOpen])
-
-  // When user types, parse in the current period & convert to daily
-  const handleInput = useCallback(e => {
-    setInputStr(e.target.value)
-    const v = parseFloat(e.target.value)
-    if (!isNaN(v) && v > 0) {
-      setDaily(v / periodMult[period])
-    }
-  }, [period])
-
-  // When period changes, convert the displayed value
-  const handlePeriodChange = useCallback(e => {
-    const next = e.target.value
-    setPeriod(next)
-    setInputStr((daily * periodMult[next]).toFixed(1))
-  }, [daily])
-
-  const factor = daily / baseDaily
-  const peakMults = { Small: 0.7, Normal: 1.0, Large: 1.4 }
-  const peakHours = { morning: [7, 8, 9, 10], afternoon: [16, 17, 18, 19] }
-
-  function applyPeakMults(data) {
-    const noMorning = !peakPills.includes('morning')
-    const noEvening = !peakPills.includes('afternoon')
-    if (noMorning && noEvening) return data.map(() => +data[0].toFixed(2))
-    return data.map((v, i) => {
-      if (noMorning && i < 12) return +data[0].toFixed(2)
-      if (peakPills.includes('morning') && peakHours.morning.includes(i)) return +(v * peakMults[morningSize]).toFixed(2)
-      if (noEvening && i >= 12) return +data[12].toFixed(2)
-      if (peakPills.includes('afternoon') && peakHours.afternoon.includes(i)) return +(v * peakMults[afternoonSize]).toFixed(2)
-      return v
-    })
-  }
-
-  const wd = applyPeakMults(scale(wdBase, factor))
-  const we = applyPeakMults(scale(weBase, factor))
-  const wdPeak = Math.max(...wd)
-  const wePeak = Math.max(...we)
-  const wdTotal = wd.reduce((a, b) => a + b, 0)
-  const weTotal = we.reduce((a, b) => a + b, 0)
 
   return (
     <div style={{ fontFamily: 'sans-serif', padding: 24, color: '#333' }}>
@@ -189,7 +261,7 @@ export default function App() {
             {wdTotal.toFixed(1)} kWh/day &middot; {wdPeak.toFixed(1)} kW peak
           </div>
           <div style={{ width: 420, height: 260 }}>
-            <Bar ref={wdRef} data={mkData(wd, 'rgba(59,130,246,0.7)')} options={chartOpts} />
+            <Bar ref={wdRef} data={mkData(wdCurve, 'rgba(59,130,246,0.7)')} options={chartOpts} />
           </div>
         </div>
         <div>
@@ -198,12 +270,14 @@ export default function App() {
             {weTotal.toFixed(1)} kWh/day &middot; {wePeak.toFixed(1)} kW peak
           </div>
           <div style={{ width: 420, height: 260 }}>
-            <Bar ref={weRef} data={mkData(we, 'rgba(34,197,94,0.7)')} options={chartOpts} />
+            <Bar ref={weRef} data={mkData(weCurve, 'rgba(34,197,94,0.7)')} options={chartOpts} />
           </div>
         </div>
       </div>
 
+      {/* --- Pills bar --- */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 18 }}>
+        {/* Average pill (always present, index 1,000,000 conceptually) */}
         <Pill>
           <span>Average</span>
           <div ref={periodRef} style={{ position: 'relative' }}>
@@ -251,70 +325,18 @@ export default function App() {
           />
           <span>kWh</span>
         </Pill>
-        {peakPills.includes('morning') && (
-          <Pill onRemove={() => setPeakPills(prev => prev.filter(p => p !== 'morning'))}>
-            <div ref={morningRef} style={{ position: 'relative', display: 'inline-flex', gap: 3 }}>
-              <span onClick={() => setMorningOpen(!morningOpen)} style={{ cursor: 'pointer', fontWeight: 700 }}>
-                {morningSize} <span style={{ fontSize: 9, color: '#888' }}>▾</span>
-              </span>
-              <span>morning peak</span>
-              {morningOpen && (
-                <div style={{
-                  position: 'absolute', top: '100%', left: 0, zIndex: 10,
-                  background: '#fff', border: '1px solid #e5e5e5', borderRadius: 4,
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.07)', padding: '2px 0',
-                  minWidth: 60, marginTop: 3
-                }}>
-                  {['Small','Normal','Large'].map(s => (
-                    <div key={s}
-                      onClick={() => { setMorningSize(s); setMorningOpen(false) }}
-                      style={{
-                        padding: '4px 10px', cursor: 'pointer', fontSize: 12,
-                        background: s === morningSize ? '#f5f5f5' : 'transparent', color: '#444',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#f0f0f0'}
-                      onMouseLeave={e => e.currentTarget.style.background = s === morningSize ? '#f5f5f5' : 'transparent'}
-                    >
-                      {s}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Pill>
-        )}
-        {peakPills.includes('afternoon') && (
-          <Pill onRemove={() => setPeakPills(prev => prev.filter(p => p !== 'afternoon'))}>
-            <div ref={afternoonRef} style={{ position: 'relative', display: 'inline-flex', gap: 3 }}>
-              <span onClick={() => setAfternoonOpen(!afternoonOpen)} style={{ cursor: 'pointer', fontWeight: 700 }}>
-                {afternoonSize} <span style={{ fontSize: 9, color: '#888' }}>▾</span>
-              </span>
-              <span>evening peak</span>
-              {afternoonOpen && (
-                <div style={{
-                  position: 'absolute', top: '100%', left: 0, zIndex: 10,
-                  background: '#fff', border: '1px solid #e5e5e5', borderRadius: 4,
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.07)', padding: '2px 0',
-                  minWidth: 60, marginTop: 3
-                }}>
-                  {['Small','Normal','Large'].map(s => (
-                    <div key={s}
-                      onClick={() => { setAfternoonSize(s); setAfternoonOpen(false) }}
-                      style={{
-                        padding: '4px 10px', cursor: 'pointer', fontSize: 12,
-                        background: s === afternoonSize ? '#f5f5f5' : 'transparent', color: '#444',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#f0f0f0'}
-                      onMouseLeave={e => e.currentTarget.style.background = s === afternoonSize ? '#f5f5f5' : 'transparent'}
-                    >
-                      {s}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Pill>
-        )}
+
+        {/* Peak pills */}
+        {sortedPills.map(pill => (
+          <PeakPill
+            key={pill.id}
+            pill={pill}
+            onRemove={removePill}
+            onParamChange={setPillParam}
+          />
+        ))}
+
+        {/* + Add button */}
         <div ref={addRef} style={{ position: 'relative' }}>
           <Pill
             hideDot
@@ -331,31 +353,22 @@ export default function App() {
               background: '#fff', border: '1px solid #e5e5e5', borderRadius: 6,
               boxShadow: '0 2px 12px rgba(0,0,0,0.08)', padding: '4px 0', minWidth: 120
             }}>
-              {!peakPills.includes('morning') && (
-                <div
-                  onClick={() => { setPeakPills(prev => [...prev, 'morning']); setAddOpen(false) }}
-                  style={{
-                    padding: '6px 12px', cursor: 'pointer', fontSize: 12, color: '#444',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#f0f0f0'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  morning peak
-                </div>
+              {Object.entries(PILL_TYPES).map(([type, def]) =>
+                !activeTypes.includes(type) ? (
+                  <div
+                    key={type}
+                    onClick={() => { addPill(type); setAddOpen(false) }}
+                    style={{
+                      padding: '6px 12px', cursor: 'pointer', fontSize: 12, color: '#444',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#f0f0f0'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    {def.label.toLowerCase()}
+                  </div>
+                ) : null
               )}
-              {!peakPills.includes('afternoon') && (
-                <div
-                  onClick={() => { setPeakPills(prev => [...prev, 'afternoon']); setAddOpen(false) }}
-                  style={{
-                    padding: '6px 12px', cursor: 'pointer', fontSize: 12, color: '#444',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#f0f0f0'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  evening peak
-                </div>
-              )}
-              {peakPills.includes('morning') && peakPills.includes('afternoon') && (
+              {Object.keys(PILL_TYPES).every(t => activeTypes.includes(t)) && (
                 <div style={{ padding: '6px 12px', fontSize: 12, color: '#999' }}>
                   all peaks shown
                 </div>
@@ -364,23 +377,6 @@ export default function App() {
           )}
         </div>
       </div>
-
-      {extraProfiles.map(p => {
-        const pd = scale(wdBase, factor)
-        return (
-          <div key={p.id} style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start', marginTop: 18 }}>
-            <div>
-              <h2 style={{ fontSize: 14, fontWeight: 600, margin: '0 0 6px 0', color: '#555' }}>{p.label}</h2>
-              <div style={{ fontSize: 12, color: '#777', marginBottom: 8 }}>
-                {pd.reduce((a, b) => a + b, 0).toFixed(1)} kWh/day &middot; {Math.max(...pd).toFixed(1)} kW peak
-              </div>
-              <div style={{ width: 420, height: 260 }}>
-                <Bar data={mkData(pd, p.color)} options={chartOpts} />
-              </div>
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
