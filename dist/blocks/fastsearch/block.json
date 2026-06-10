@@ -1,0 +1,21 @@
+{
+  "apiVersion": 3,
+  "name": "fastsearch/search",
+  "title": "FastSearch",
+  "category": "widgets",
+  "icon": "search",
+  "description": "Australian postcode search — find energy plans by postcode.",
+  "keywords": ["postcode", "energy", "plans", "australia"],
+  "textdomain": "fastsearch",
+  "attributes": {
+    "placeholder": {
+      "type": "string",
+      "default": "Type a postcode..."
+    }
+  },
+  "supports": {
+    "html": false,
+    "inserter": true
+  },
+  "editorScript": "file:./block.js"
+}

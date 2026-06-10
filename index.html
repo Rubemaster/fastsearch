@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FastSearch</title>
+</head>
+<body>
+
+<input type="text" id="postcode-input" placeholder="Type a postcode..." autofocus style="width:300px;max-width:100%;font-size:16px;padding:8px 12px;">
+<div style="margin-top:6px;font-size:13px">
+  <label><input type="radio" name="mode" value="pooler" checked> Pooler</label>
+  <label style="margin-left:12px"><input type="radio" name="mode" value="direct"> Direct</label>
+  <label style="margin-left:16px;cursor:pointer;user-select:none" id="timing-toggle">
+    <input type="checkbox" id="show-timing" style="vertical-align:middle">
+    <span style="vertical-align:middle;margin-left:4px">Timing</span>
+  </label>
+</div>
+<div id="suggestions" style="margin-top:6px;font-size:14px;"></div>
+<div id="timing" style="margin-top:8px;font-size:14px;display:none;"></div>
+<script>
+document.getElementById('show-timing').addEventListener('change', function() {
+  document.getElementById('timing').style.display = this.checked ? 'block' : 'none'
+})
+</script>
+<div id="results" style="margin-top:12px;font-size:15px;"></div>
+<div id="results-mount"></div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

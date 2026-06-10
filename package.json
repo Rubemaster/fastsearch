@@ -1,0 +1,22 @@
+{
+  "name": "fastsearch",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "node scripts/build.js",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  },
+  "dependencies": {
+    "@tanstack/react-virtual": "^3.14.2",
+    "@vitejs/plugin-react": "^4.7.0",
+    "apache-arrow": "^21.1.0",
+    "parquet-wasm": "^0.7.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "vite-plugin-wasm": "^3.6.0"
+  }
+}
